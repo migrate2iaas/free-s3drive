@@ -1,5 +1,7 @@
 import string
 import os
+import sys
+import subprocess
 
 def get_free_drives():
     #TODO: implement non-Windows version
@@ -24,9 +26,14 @@ def mount(key, secret, bucket, mountpoint):
     #setting env for new proc
     os.environ["AWS_ACCESS_KEY_ID"] = str(key)
     os.environ["AWS_SECRET_ACCESS_KEY"] = str(secret)
-    python_path = sys.executable
-    #TODO: check mount OK somehow
-    p = _run_proc([python_path , "-m" , "yas3fs.__init__" , bucket , mountpoint, '--log' , 'fs.log'])
+    
+    if getattr( sys, 'frozen', False ) :
+        # running in a bundle , we exec the same module
+        p = _run_proc([sys.executable , "YAFS" , bucket , mountpoint, '--log' , 'fs.log'])
+    else:
+        # running live
+        python_path = sys.executable
+        p = _run_proc([python_path , "-m" , "yas3fs.__init__" , bucket , mountpoint, '--log' , 'fs.log'])
     return {"process" : p , "mountpoint" : mountpoint}
 
 def mount_alive(mount_obj):
@@ -37,5 +44,5 @@ def mount_alive(mount_obj):
     #TODO: On Linux also check return os.path.ismount(mount_obj["mountpoint"])
     return True
 
-def unmount(mount_obj)
+def unmount(mount_obj):
     mount_obj["process"].terminate()
