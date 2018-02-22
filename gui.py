@@ -1,7 +1,11 @@
 import os
+import time
+import sys
+import subprocess
+
 import s3func
 import mount
-import time
+import error
 
 from Tkinter import *
 try:
@@ -13,22 +17,51 @@ except ImportError: # Python 2
     import tkFont
     import tkMessageBox as messagebox
 
-
+if getattr( sys, 'frozen', False ):
+    resources_dir = sys._MEIPASS+'/res'
+else:
+    resources_dir = os.getcwd()+'/res' # save the resources dir as subsequent chdir is possible 
+    
 buckets_loaded = False
 mounted = False
 mount_obj = None
+root = None
+
+def show_message(caption , text):
+    if not root:
+        Tk().withdraw()
+    messagebox.showinfo(caption, text)
 
 def show_error(caption , text):
+    if not root:
+        Tk().withdraw()
     messagebox.showerror(caption, text)
 
+def show_prompt(caption , text):
+    if not root:
+        Tk().withdraw()
+    return messagebox.askokcancel(caption, text)
+
+def splash(imagename):
+    """
+       use with `with` statement
+       do not use after start_gui() called
+    """
+    import splash as spl
+    temp_root = root
+    if not temp_root:
+        temp_root = Tk()
+    temp_root.deiconify()
+    return spl.SplashScreen( temp_root, resources_dir + '\\{0}.gif'.format(imagename), 2.0 )
 
 def start_gui():
     # CONSTANTS
     AWS_KEY_LEN = 20
     AWS_SECRET_LEN = 40
 
-    # MAIN......
+    global root
     root = Tk()
+    
 
     #set the default style for every gui element
     font = tkFont.Font(family='Arial', size=11)
@@ -66,6 +99,20 @@ def start_gui():
                 buckets_loaded = False
             root.config(cursor="")
 
+    def _delete_window():
+        if mounted:
+            if not messagebox.askokcancel("Quit", "Closing this window will result in S3Drive to unmount.\nAre you sure you want to exit?"):
+                return
+            else:
+                mount_command()
+        try:
+            if mountobj:
+                mount.unmount(mount_obj)
+        except Exception as e:
+            pass
+        root.destroy()
+        sys.exit(0)
+
     def mount_command():
         global mounted 
         global mount_obj 
@@ -73,30 +120,50 @@ def start_gui():
             messagebox.showinfo("AWS Keys needed" , "Please enter your AWS keys and select bucket to mount to proceed!")
             return
         if mounted == False:
-            #TODO: check errors and exception
+            mount_button_text.set("Mounting...Wait up to 1 min.")
             root.config(cursor="wait")
             root.update()
-            mount_obj = mount.mount(key_var.get() , secret_var.get() , bucket_var.get() , drive_var.get())
-            time.sleep(3)
-            root.config(cursor="")
-            if mount_alive():
-                mount_button.text = "Unmount"
-                mounted = True
+            try:
+                mount_obj = mount.mount(key_var.get() , secret_var.get() , bucket_var.get() , drive_var.get())
+                check_interval = 3
+                max_time_wait = 30
+                time_waited = 0
+                while 1:
+                    if mount.mount_alive(mount_obj):
+                        #TODO: disable all inputs
+                        mount_button_text.set("Unmount")
+                        mounted = True
+                        show_message("Mount Success" , "Bucket {0} mounted to drive {1}".format(bucket_var.get() , drive_var.get()));
+                        break
+                    else:
+                        time.sleep(check_interval)
+                        time_waited += check_interval
+                    if time_waited > max_time_wait:
+                        messagebox.showwarning("Failed to mount!" , "Failed to mount!\nPlease check {0}\\fs.log for more info".format(os.getcwd()))
+                        break
+            except Exception as e:
+                error.show_exception("Failed to mount!" , e)
+            if not mounted:    
+                mount_button_text.set("Mount")
             else:
-                #TODO: more descriptive errors
-                messagebox.showwarning("Failed to mount!" , "Please check fs.log for more info")
+                #TODO: windows-only
+                subprocess.Popen(r'explorer /select,"'+drive_var.get()+'"')
+            root.config(cursor="")
+            root.update()
         else:
             root.config(cursor="wait")
             root.update()
             mount.unmount(mount_obj)
-            time.sleep(3)
-            root.config(cursor="")
-            if mount_alive():
-                mount_button.text = "Mount"
+            time.sleep(8)
+            if not mount.mount_alive(mount_obj):
+                #TODO: enable all inputs
+                mount_button_text.set("Mount")
                 mounted = False
             else:
                 #TODO: more descriptive errors
                 messagebox.showwarning("Failed to unmount!" , "Please check fs.log for more info")
+            root.config(cursor="")
+            root.update()
         
     #TODO: make it configurable so to support more param entries
     row = 0
@@ -121,7 +188,7 @@ def start_gui():
     bucket_label = Label(root,text="Bucket:" , **label_style_kwarg)
     bucket_label.grid(row = row , column = 1, **default_grid_kwarg)
     bucket_var = StringVar(root)
-    choices = { 'Enter AWS Keys above to load bucket list...'}
+    choices = { 'Enter AWS Keys above to load the bucket list...'}
     bucket_var.set(list(choices)[0])
     #bucket_var.trace("w", lambda name, index, mode, sv=bucket_var: input_callback(sv))
     bucket_options = OptionMenu(root, bucket_var, *choices)
@@ -137,13 +204,15 @@ def start_gui():
     drive_options = OptionMenu(root, drive_var, *choices)
     drive_options.grid(row = row , column = 2, **default_grid_kwarg)
 
-    #TODO: start yas3fs
-    #TODO: set icon
-
     # last row
     row = row + 1
-    mount_button = Button(root, text = '   Mount   ', command=mount_command, **default_style_kwarg)
+    mount_button_text = StringVar()
+    mount_button = Button(root, textvariable = mount_button_text, command=mount_command, **default_style_kwarg)
+    mount_button_text.set("Mount")
     mount_button.grid(row = row , column = 1 , columnspan = 2, **default_grid_kwarg)
+
+    root.protocol("WM_DELETE_WINDOW", _delete_window)
+    root.deiconify()
     root.mainloop()
 
 if __name__ == '__main__':

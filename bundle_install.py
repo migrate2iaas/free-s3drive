@@ -7,13 +7,13 @@ import os
 import sys
 
 
-def _install_msi(msifile):
+def _install_msi(msifile , log_dir = os.getcwd()):
     #win-only
     import subprocess
     DETACHED_PROCESS = 0x00000008 # hides console window
-    proc = subprocess.Popen(["msiexec" , "/quiet" , "/l*v" , os.getcwd()+"\\msi_install.log" , "/i" , os.path.abspath(msifile) ] ,
-                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                  creationflags = DETACHED_PROCESS)
+    proc = subprocess.Popen(["msiexec" , "/quiet" , "/l*v" ,
+                             log_dir+"\\msi_install_{0}.log".format(os.path.basename(msifile))
+                             , "/i" ,  os.path.abspath(msifile) ] , creationflags = DETACHED_PROCESS)
     output = str(proc.communicate()[0])
     if proc.returncode:
         raise subprocess.CalledProcessError(p.returncode , args, output)       
@@ -49,12 +49,17 @@ def install(msi_deps = True, shortcuts = True):
     """installs the software and deps"""
     import shutil
     #TODO: handle errors
-    if msi_deps:
-        for f in os.listdir(sys._MEIPASS+'/msi'):
-            if os.path.isfile(f):
-                _install_msi(f)
-
     location = get_location();
+    
+    if msi_deps:
+        msi_folder = "./msi"
+        if getattr( sys, 'frozen', False ):
+            msi_folder = sys._MEIPASS+'/msi'
+        for f in os.listdir(msi_folder):
+            path = os.path.join(msi_folder, f)
+            if os.path.isfile(path):
+                _install_msi(path , os.path.dirname(location))
+
     shutil.copy(sys.executable , location)
     if shortcuts:
         _install_shortcuts(location)
